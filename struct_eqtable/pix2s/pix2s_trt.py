@@ -35,20 +35,30 @@ def trt_dtype_to_torch(dtype):
 
 class Pix2StructTensorRT(nn.Module):
 
-    def __init__(self, model_path, tensorrt_path, batch_size=1, max_new_tokens=4096, **kwargs):
-        
+    def __init__(
+            self,
+            model_path,
+            tensorrt_path,
+            batch_size=1,
+            max_new_tokens=4096,
+            cache_dir=None,
+            local_files_only=None,
+            **kwargs,
+        ):
         self.model_ckpt_path = model_path
         self.tensorrt_path = tensorrt_path
         self.batch_size = batch_size
         self.max_new_tokens = max_new_tokens
+        self.cache_dir = cache_dir
+        self.local_files_only = local_files_only
 
         self.llm_engine_path = os.path.join(tensorrt_path, 'llm_engines')
         self.visual_engine_path = os.path.join(tensorrt_path, 'visual_engines')
-        
+
         device_id = torch.cuda.current_device() % torch.cuda.device_count()
         self.device_id = device_id
         self.device = "cuda:%d" % (device_id)
-        
+
         self.stream = torch.cuda.Stream(torch.cuda.current_device())
         torch.cuda.set_stream(self.stream)
 
@@ -82,11 +92,19 @@ class Pix2StructTensorRT(nn.Module):
 
     def init_image_processor(self):
         self.data_processor = AutoProcessor.from_pretrained(
-            self.model_ckpt_path)
+            pretrained_model_name_or_path=self.model_ckpt_path,
+            cache_dir=self.cache_dir,
+            local_files_only=self.local_files_only,
+        )
 
     def init_tokenizer(self):
         self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_ckpt_path, use_fast=True, use_legacy=False)
+            pretrained_model_name_or_path=self.model_ckpt_path,
+            use_fast=True,
+            use_legacy=False,
+            cache_dir=self.cache_dir,
+            local_files_only=self.local_files_only,
+        )
         # self.tokenizer.padding_side = "right"
 
     def init_image_encoder(self):
@@ -121,7 +139,7 @@ class Pix2StructTensorRT(nn.Module):
 
         model_output = self.run(
             flattened_patches=image_tokens['flattened_patches'],
-            attention_mask=image_tokens['attention_mask'], 
+            attention_mask=image_tokens['attention_mask'],
             max_new_tokens=self.max_new_tokens
         )
 
@@ -143,7 +161,7 @@ class Pix2StructTensorRT(nn.Module):
 
         if not warmup:
             profiler.stop("Vision")
-       
+
         pre_input_ids = self.tokenizer(pre_prompt,
                                         return_tensors="pt",
                                         padding=True).input_ids
@@ -219,7 +237,7 @@ class Pix2StructTensorRT(nn.Module):
         else:
             profiler.stop("Generate")
             return None
-        
+
     def get_visual_features(self, image, attention_mask):
         visual_features = {
             'input':
@@ -255,7 +273,7 @@ class Pix2StructTensorRT(nn.Module):
                                 dtype=torch.long).to(image.device)
 
         return image_embeds, image_atts
-    
+
     def setup_fake_prompts(self, visual_features, pre_input_ids, post_input_ids,
                            input_lengths):
         # Assemble fake prompts which points to image embedding actually
@@ -269,7 +287,7 @@ class Pix2StructTensorRT(nn.Module):
             input_ids = [pre_input_ids, fake_prompt_id, post_input_ids]
         else:
             input_ids = [fake_prompt_id, pre_input_ids]
-        
+
         input_ids = torch.cat(input_ids, dim=1).contiguous().to(torch.int32)
 
         if self.decoder_llm or self.runtime_mapping.is_first_pp_rank():
@@ -311,8 +329,12 @@ class Pix2StructTensorRT(nn.Module):
 
     def setup_inputs(self, input_text, raw_image):
         attention_mask = None
-       
-        image_processor = AutoProcessor.from_pretrained(self.model_ckpt_path)
+
+        image_processor = AutoProcessor.from_pretrained(
+            pretrained_model_name_or_path=self.model_ckpt_path,
+            cache_dir=self.cache_dir,
+            local_files_only=self.local_files_only,
+        )
         if input_text is None:
             input_text = ""
         inputs = image_processor(
@@ -340,7 +362,11 @@ class Pix2StructTensorRT(nn.Module):
         if self.decoder_llm:
             decoder_input_ids = None
         else:
-            config = AutoConfig.from_pretrained(self.model_ckpt_path)
+            config = AutoConfig.from_pretrained(
+                pretrained_model_name_or_path=self.model_ckpt_path,
+                cache_dir=self.cache_dir,
+                local_files_only=self.local_files_only,
+            )
             decoder_start_id = config.decoder_start_token_id  # T5
             if decoder_start_id is None:
                 decoder_start_id = config.decoder.bos_token_id  # Nougat
@@ -355,8 +381,12 @@ class Pix2StructTensorRT(nn.Module):
         #     None, raw_image)
         pre_prompt = [""] * self.batch_size
         post_prompt = [None] * self.batch_size
-        config = AutoConfig.from_pretrained(self.model_ckpt_path)
-        decoder_start_id = config.decoder_start_token_id  # T5 
+        config = AutoConfig.from_pretrained(
+            pretrained_model_name_or_path=self.model_ckpt_path,
+            cache_dir=self.cache_dir,
+            local_files_only=self.local_files_only,
+        )
+        decoder_start_id = config.decoder_start_token_id  # T5
         decoder_input_ids = torch.IntTensor([[decoder_start_id]])
         decoder_input_ids = decoder_input_ids.repeat((self.batch_size, 1))
 
@@ -613,7 +643,7 @@ class TRTLLMEncDecModel:
         # in multi-node setup, it's important to set_device at the very beginning so .to('cuda') refers to current device
         # accordingly, all input & output tensors should be moved to current device
         # otherwise, it's default to 'cuda:0'
-        
+
         # self.runtime_rank = tensorrt_llm.mpi_rank()
         self.device_id = torch.cuda.current_device()
         # torch.cuda.set_device(device_id)
@@ -713,7 +743,7 @@ class TRTLLMEncDecModel:
             )
         else:
             self.decoder_lora_manager = None
-    
+
     @classmethod
     def from_engine(cls,
                     engine_name,
