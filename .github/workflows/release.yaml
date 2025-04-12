@@ -1,0 +1,25 @@
+name: "tagged-release"
+on:
+  push:
+    tags:
+      - "v*"
+jobs:
+  tagged-release:
+    name: "Tagged Release"
+    runs-on: "ubuntu-latest"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Create zip archive of struct_eqtable
+        run: |
+          cd struct_eqtable
+          zip -r struct_eqtable.zip .
+
+      - uses: "marvinpinto/action-automatic-releases@latest"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: "${{ github.ref_name }}"
+          prerelease: false
+          files: struct_eqtable/struct_eqtable.zip
