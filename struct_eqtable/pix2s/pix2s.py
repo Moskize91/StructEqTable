@@ -5,11 +5,21 @@ from transformers import AutoModelForVision2Seq, AutoProcessor
 
 
 class Pix2Struct(nn.Module):
-    def __init__(self, model_path='U4R/StructTable-base', max_new_tokens=1024, max_time=30, **kwargs):
+    def __init__(
+            self,
+            model_path='U4R/StructTable-base',
+            max_new_tokens=1024,
+            max_time=30,
+            cache_dir=None,
+            local_files_only=None,
+            **kwargs,
+        ):
         super().__init__()
         self.model_path = model_path
         self.max_new_tokens = max_new_tokens
         self.max_generate_time = max_time
+        self.cache_dir = cache_dir
+        self.local_files_only = local_files_only
 
         # init model and image processor from ckpt path
         self.init_image_processor(model_path)
@@ -24,11 +34,19 @@ class Pix2Struct(nn.Module):
         return code
 
     def init_model(self, model_path):
-        self.model = AutoModelForVision2Seq.from_pretrained(model_path)
+        self.model = AutoModelForVision2Seq.from_pretrained(
+            pretrained_model_name_or_path=model_path,
+            cache_dir=self.cache_dir,
+            local_files_only=self.local_files_only,
+        )
         self.model.eval()
 
     def init_image_processor(self, image_processor_path):
-        self.data_processor = AutoProcessor.from_pretrained(image_processor_path)
+        self.data_processor = AutoProcessor.from_pretrained(
+            pretrained_model_name_or_path=image_processor_path,
+            cache_dir=self.cache_dir,
+            local_files_only=self.local_files_only,
+        )
 
     def forward(self, image, **kwargs):
         # process image to tokens
@@ -44,7 +62,7 @@ class Pix2Struct(nn.Module):
         # generate text from image tokens
         model_output = self.model.generate(
             flattened_patches=image_tokens['flattened_patches'],
-            attention_mask=image_tokens['attention_mask'], 
+            attention_mask=image_tokens['attention_mask'],
             max_new_tokens=self.max_new_tokens,
             max_time=self.max_generate_time,
             no_repeat_ngram_size=20,

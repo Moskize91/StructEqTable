@@ -6,12 +6,23 @@ from transformers import AutoModel, AutoTokenizer, AutoImageProcessor, Generatio
 from .conversation import get_conv_template
 
 class InternVL(nn.Module):
-    def __init__(self, model_path='U4R/StructTable-InternVL2-1B', max_new_tokens=1024, max_time=30, flash_attn=True, **kwargs):
+    def __init__(
+            self,
+            model_path='U4R/StructTable-InternVL2-1B',
+            max_new_tokens=1024,
+            max_time=30,
+            flash_attn=True,
+            cache_dir=None,
+            local_files_only=None,
+            **kwargs,
+        ):
         super().__init__()
         self.model_path = model_path
         self.max_new_tokens = max_new_tokens
         self.max_generate_time = max_time
         self.flash_attn = flash_attn
+        self.cache_dir = cache_dir
+        self.local_files_only = local_files_only
 
         # init model and image processor from ckpt path
         self.init_tokenizer(model_path)
@@ -28,25 +39,31 @@ class InternVL(nn.Module):
 
     def init_model(self, model_path):
         self.model = AutoModel.from_pretrained(
-            model_path,
+            pretrained_model_name_or_path=model_path,
             trust_remote_code=True,
             torch_dtype=torch.bfloat16,
             low_cpu_mem_usage=True,
             use_flash_attn=self.flash_attn,
+            cache_dir=self.cache_dir,
+            local_files_only=self.local_files_only,
         )
         self.model.eval()
-    
+
     def init_image_processor(self, image_processor_path):
         self.image_processor = AutoImageProcessor.from_pretrained(
-            image_processor_path,
+            pretrained_model_name_or_path=image_processor_path,
             trust_remote_code=True,
+            cache_dir=self.cache_dir,
+            local_files_only=self.local_files_only,
         )
 
     def init_tokenizer(self, tokenizer_path):
         self.tokenizer = AutoTokenizer.from_pretrained(
-            tokenizer_path,
+            pretrained_model_name_or_path=tokenizer_path,
             trust_remote_code=True,
             use_fast=False,
+            cache_dir=self.cache_dir,
+            local_files_only=self.local_files_only,
         )
 
         self.image_context_token = '<IMG_CONTEXT>'
@@ -54,26 +71,26 @@ class InternVL(nn.Module):
         self.image_start_token = '<img>'
         self.image_end_token = '</img>'
         self.img_context_token_id = self.tokenizer.convert_tokens_to_ids(self.image_context_token)
-    
+
     def format_image_tokens(self, path_num):
         return f'{self.image_start_token}{self.image_context_token* self.image_token_num * path_num}{self.image_end_token}'
 
     def forward(self, images, output_format='latex', **kwargs):
         # process image to tokens
         if not isinstance(images, list):
-            images = [images] 
-        
+            images = [images]
+
         pixel_values_list = []
         for image in images:
             path_images = self.dynamic_preprocess(
                 image, image_size=448, max_num=12
             )
             pixel_values = self.image_processor(
-                path_images, 
+                path_images,
                 return_tensors='pt'
             )['pixel_values'].to(torch.bfloat16)
             pixel_values_list.append(pixel_values)
-        
+
         batch_size = len(pixel_values_list)
         conversation_list = []
         for bs_idx in range(batch_size):
@@ -82,7 +99,7 @@ class InternVL(nn.Module):
             image_tokens = self.format_image_tokens(pixel_values.shape[0])
             question = '<image>\n' + self.prompt_template[output_format]
             answer = None
-        
+
             template = get_conv_template(self.model.config.template)
             template.append_message(template.roles[0], question)
             template.append_message(template.roles[1], answer)
@@ -93,8 +110,8 @@ class InternVL(nn.Module):
         device = next(self.parameters()).device
         self.tokenizer.padding_side = 'left'
         model_inputs = self.tokenizer(
-            conversation_list, 
-            return_tensors='pt', 
+            conversation_list,
+            return_tensors='pt',
             padding=True,
             max_length=self.tokenizer.model_max_length,
             truncation=True,
@@ -116,7 +133,7 @@ class InternVL(nn.Module):
         model_output = self.model.generate(
             pixel_values=pixel_values,
             input_ids=model_inputs.input_ids,
-            attention_mask=model_inputs.attention_mask, 
+            attention_mask=model_inputs.attention_mask,
             **generation_config,
             # **kwargs
         )
@@ -126,7 +143,7 @@ class InternVL(nn.Module):
             skip_special_tokens=True
         )
         return batch_decode_texts
-    
+
     def find_closest_aspect_ratio(self, aspect_ratio, target_ratios, width, height, image_size):
         best_ratio_diff = float('inf')
         best_ratio = (1, 1)

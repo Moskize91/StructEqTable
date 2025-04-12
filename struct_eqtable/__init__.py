@@ -28,7 +28,12 @@ def get_model_name(model_path):
     return model_name
 
 
-def build_model(model_ckpt='U4R/StructTable-InternVL2-1B', **kwargs):
+def build_model(
+        model_ckpt='U4R/StructTable-InternVL2-1B',
+        cache_dir=None,
+        local_files_only=None,
+        **kwargs,
+    ):
     model_name = get_model_name(model_ckpt)
     if model_name == 'InternVL' and kwargs.get('lmdeploy', False):
         model_name = 'InternVL_LMDeploy'
@@ -36,8 +41,9 @@ def build_model(model_ckpt='U4R/StructTable-InternVL2-1B', **kwargs):
         model_name = 'Pix2StructTensorRT'
 
     model = __ALL_MODELS__[model_name](
-        model_ckpt, 
+        model_ckpt,
+        cache_dir=cache_dir,
+        local_files_only=local_files_only,
         **kwargs
     )
-
     return model

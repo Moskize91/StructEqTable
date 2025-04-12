@@ -9,11 +9,21 @@ except:
 
 
 class InternVL_LMDeploy(nn.Module):
-    def __init__(self, model_path='U4R/StructTable-InternVL2-1B', max_new_tokens=1024, batch_size=4, **kwargs):
+    def __init__(
+            self,
+            model_path='U4R/StructTable-InternVL2-1B',
+            max_new_tokens=1024,
+            batch_size=4,
+            cache_dir=None,
+            local_files_only=None,
+            **kwargs,
+        ):
         super().__init__()
         self.model_path = model_path
         self.max_new_tokens = max_new_tokens
         self.max_batch_size = batch_size
+        self.cache_dir = cache_dir
+        self.local_files_only = local_files_only
 
         # init model and tokenizer from ckpt path
         self.init_tokenizer(model_path)
@@ -26,12 +36,14 @@ class InternVL_LMDeploy(nn.Module):
         }
         # support output format
         self.supported_output_format = ['latex', 'html', 'markdown']
-    
+
     def init_tokenizer(self, tokenizer_path):
         self.tokenizer = AutoTokenizer.from_pretrained(
-            tokenizer_path,
+            pretrained_model_name_or_path=tokenizer_path,
             trust_remote_code=True,
             use_fast=False,
+            cache_dir=self.cache_dir,
+            local_files_only=self.local_files_only,
         )
 
     def init_model(self, model_path):
@@ -49,8 +61,8 @@ class InternVL_LMDeploy(nn.Module):
     def forward(self, images, output_format='latex', **kwargs):
         # process image to tokens
         if not isinstance(images, list):
-            images = [images] 
-        
+            images = [images]
+
         prompts = [self.prompt_template[output_format]] * len(images)
         generation_config = GenerationConfig(
             max_new_tokens=self.max_new_tokens,
@@ -58,12 +70,12 @@ class InternVL_LMDeploy(nn.Module):
             temperature=1.0,
             stop_token_ids=[self.tokenizer.eos_token_id],
         )
-        
+
         responses = self.pipeline(
             [(x, y) for x, y in zip(prompts, images)],
             gen_config=generation_config,
         )
         batch_decode_texts = [responce.text for responce in responses]
         return batch_decode_texts
-    
+
 
